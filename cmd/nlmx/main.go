@@ -141,6 +141,8 @@ func run(args []string) int {
 			return cmdAccount(args[1:], p, cwd, accounts, accountSet)
 		case "log":
 			return cmdLog(args[1:], p.LogDir)
+		case "usage":
+			return cmdUsage(args[1:], accounts, accountSet)
 		}
 	}
 
@@ -200,6 +202,22 @@ func run(args []string) int {
 			// invoke the child with another account's credentials.
 			attempts = append(attempts, attempt{Account: cand, RC: 3, Class: "auth"})
 			continue
+		}
+		if os.Getenv("NLMX_QUOTA_GATE") == "1" {
+			usage, err := fetchUsage(cand, creds)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "nlmx: %s: quota read failed: %v\n", cand, err)
+				attempts = append(attempts, attempt{Account: cand, RC: 3, Class: "auth"})
+				continue
+			}
+			minRolling := envFloat("NLMX_QUOTA_MIN_ROLLING", 10)
+			minWeekly := envFloat("NLMX_QUOTA_MIN_WEEKLY", 10)
+			if !quotaAllows(usage, minRolling, minWeekly) {
+				fmt.Fprintf(os.Stderr, "nlmx: %s: quota below threshold (rolling>=%.0f%%, weekly>=%.0f%%)\n",
+					cand, minRolling, minWeekly)
+				attempts = append(attempts, attempt{Account: cand, RC: 5, Class: "quota"})
+				continue
+			}
 		}
 		rc, output := runChild(bin, args, creds, cand)
 		cl := ""
